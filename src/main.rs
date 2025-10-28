@@ -34,7 +34,6 @@ enum Command {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    // parse the cli command
     let (topic, endpoints) = match &args.command {
         Command::Open => {
             let topic = TopicId::from_bytes(rand::random());
@@ -47,7 +46,7 @@ async fn main() -> Result<()> {
             (topic, endpoints)
         }
     };
-    
+
     let endpoint = Endpoint::bind().await?;
 
     println!("> our endpoint id: {}", endpoint.id());
@@ -57,19 +56,14 @@ async fn main() -> Result<()> {
         .accept(iroh_gossip::ALPN, gossip.clone())
         .spawn();
 
-    let id = TopicId::from_bytes(rand::random());
-
-    // let topic = gossip.subscribe_and_join(id, endpoint_ids).await?;
-
     let ticket = {
 
-    let me = endpoint.addr();
-    let endpoints = vec![me];
-    Ticket { topic: id, endpoints }
+        let me = endpoint.addr();
+        let endpoints = vec![me];
+        Ticket { topic, endpoints }
     };
     println!("> ticket to join us: {ticket}");
 
-    // join the gossip topic by connecting to known endpoints, if any
     let endpoint_ids = endpoints.iter().map(|p| p.id).collect();
     if endpoints.is_empty() {
         println!("> waiting for endpoints to join us...");
@@ -105,7 +99,6 @@ async fn main() -> Result<()> {
     router.shutdown().await?;
 
     Ok(())
-
 }
 
 async fn subscribe_loop(mut receiver: GossipReceiver) -> Result<()> {
@@ -131,16 +124,11 @@ async fn subscribe_loop(mut receiver: GossipReceiver) -> Result<()> {
 
 
 fn input_loop(line_tx: tokio::sync::mpsc::Sender<String>) -> Result<()> {
-    // create a new string buffer
     let mut buffer = String::new();
-    // get a handle on `Stdin`
-    let stdin = std::io::stdin(); // We get `Stdin` here.
+    let stdin = std::io::stdin();
     loop {
-        // loop through reading from the buffer...
         stdin.read_line(&mut buffer)?;
-        // and then sending over the channel
         line_tx.blocking_send(buffer.clone())?;
-        // clear the buffer after we've sent the content
         buffer.clear();
     }
 }
