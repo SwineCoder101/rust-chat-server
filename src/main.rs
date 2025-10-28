@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, str::FromStr};
 
 use anyhow::Result;
 use clap::Parser;
@@ -32,6 +32,22 @@ enum Command {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let args = Args::parse();
+
+    // parse the cli command
+    let (topic, endpoints) = match &args.command {
+        Command::Open => {
+            let topic = TopicId::from_bytes(rand::random());
+            println!("> opening chat room for topic {topic}");
+            (topic, vec![])
+        }
+        Command::Join { ticket } => {
+            let Ticket { topic, endpoints } = Ticket::from_str(ticket)?;
+            println!("> joining chat room for topic {topic}");
+            (topic, endpoints)
+        }
+    };
+    
     let endpoint = Endpoint::bind().await?;
 
     println!("> our endpoint id: {}", endpoint.id());
@@ -42,9 +58,8 @@ async fn main() -> Result<()> {
         .spawn();
 
     let id = TopicId::from_bytes(rand::random());
-    let endpoint_ids = vec![];
 
-    let topic = gossip.subscribe_and_join(id, endpoint_ids).await?;
+    // let topic = gossip.subscribe_and_join(id, endpoint_ids).await?;
 
     let ticket = {
 
@@ -54,40 +69,43 @@ async fn main() -> Result<()> {
     };
     println!("> ticket to join us: {ticket}");
 
+    // join the gossip topic by connecting to known endpoints, if any
+    let endpoint_ids = endpoints.iter().map(|p| p.id).collect();
+    if endpoints.is_empty() {
+        println!("> waiting for endpoints to join us...");
+    } else {
+        println!("> trying to connect to {} endpoints...", endpoints.len());
+    };
+    let (sender, receiver) = gossip.subscribe_and_join(topic, endpoint_ids).await?.split();
+    println!("> connected!");
 
-    let (sender, receiver) = topic.split();
-
-
-    let message = Message::new(MessageBody::AboutMe {
-        from: endpoint.id(),
-        name: String::from("alice"),
-    });
-
-    sender.broadcast(message.to_vec().into()).await?;
+    if let Some(name) = args.name {
+        let message = Message::new(MessageBody::AboutMe {
+            from: endpoint.id(),
+            name,
+        });
+        sender.broadcast(message.to_vec().into()).await?;
+    }
 
     tokio::spawn(subscribe_loop(receiver));
+
 
     let (line_tx, mut line_rx) = tokio::sync::mpsc::channel(1);
     std::thread::spawn(move || input_loop(line_tx));
 
-
     println!("> type a message and hit enter to broadcast...");
-    // listen for lines that we have typed to be sent from `stdin`
     while let Some(text) = line_rx.recv().await {
-        // create a message from the text
         let message = Message::new(MessageBody::Message {
             from: endpoint.id(),
             text: text.clone(),
         });
-        // broadcast the encoded message
         sender.broadcast(message.to_vec().into()).await?;
-        // print to ourselves the text that we sent
         println!("> sent: {text}");
     }
-
     router.shutdown().await?;
 
     Ok(())
+
 }
 
 async fn subscribe_loop(mut receiver: GossipReceiver) -> Result<()> {
